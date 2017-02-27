@@ -1,20 +1,20 @@
 import json
 import re
-import nltk.classify.util
-from nltk.classify import NaiveBayesClassifier
-from nltk.corpus import stopwords
-import nltk.classify.util
-from nltk.stem.porter import PorterStemmer
 import math
-from collections import Counter
-import pickle
+import nltk.classify.util
 import collections
+import pickle
 import itertools
 import nltk
+
+
+from nltk.classify import NaiveBayesClassifier
+from nltk.corpus import stopwords
+from nltk.stem.porter import PorterStemmer
 from nltk.collocations import BigramCollocationFinder
 from nltk.metrics import BigramAssocMeasures
 
-
+# function for preprecoessing
 def format(review):
     # compile regular expressions that match repeated characters and emoji unicode
     multiple = re.compile(r"(.)\1{1,}", re.DOTALL)
@@ -34,7 +34,7 @@ def format(review):
     return stripped
 
 
-# construct feature vector
+# construct feature vector for training
 def word_feats(words):
     return dict([(word, True) for word in words])
 
@@ -43,13 +43,13 @@ def word_feats(words):
 def extract_feature(text, blacklist):
     formatted_text = format(text)
     stoplist = set(stopwords.words("english"))
-
     clean_review = [word for word in formatted_text.lower().split() if word not in
                     (list(stoplist) + blacklist) and len(word) > 1]
     feat = word_feats(clean_review)
-
     return feat
 
+
+# extract bigram features, sort in order of significance using chi square
 def bigram_word_feats(words, significant_uni, score_fn=BigramAssocMeasures.chi_sq, n=20):
     stoplist = set(stopwords.words("english"))
     bigram_finder = BigramCollocationFinder.from_words(words)
@@ -57,12 +57,15 @@ def bigram_word_feats(words, significant_uni, score_fn=BigramAssocMeasures.chi_s
     return dict([(ngram, True) for ngram in itertools.chain(words, bigrams) if ngram not in significant_uni and
                 ngram not in stoplist])
 
+
 # construct a training dataset and train a model on it
 def main():
+
     # build a training dataset
     positives = []
     negatives = []
 
+    # directory of training data
     yelp_f = 'yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_review.json'
     f = open(yelp_f, 'r')
     for i in range(0, 500000):
@@ -99,14 +102,14 @@ def main():
     # identify words that appear too often in both positive and negative reviews
     # remove them since they are probably not very informative
     poswords = [word for wordlist in posreviews for word in wordlist]
-    poscnt = Counter()
+    poscnt = collections.Counter()
     for posword in poswords:
         poscnt[posword] += 1
 
     top1000_pos = poscnt.most_common(1000)
 
     negwords = [word for wordlist in negreviews for word in wordlist]
-    negcnt = Counter()
+    negcnt = collections.Counter()
     for negword in negwords:
         negcnt[negword] += 1
 
@@ -124,9 +127,9 @@ def main():
         neg_key = neg_dict[0]
         freq_neg.append(neg_key)
 
-    # application of zipfian theory- words of top100 frequency shold be good enough
     toocommon = [common for common in freq_pos if common in freq_neg]
 
+    # remove words in toocommon 
     for i in range(0, len(posreviews)):
         posreviews[i] = [word for word in posreviews[i] if word not in toocommon and len(word) > 1]
 
@@ -137,6 +140,7 @@ def main():
     negfeats = [(word_feats(review), 'neg') for review in negreviews]
     posfeats = [(word_feats(review), 'pos') for review in posreviews]
 
+    # trained using 80% of data
     poscutoff = int(len(posfeats) * 0.8)
     negcutoff = int(len(negfeats) * 0.8)
     pos_n = len(posfeats)
@@ -151,8 +155,10 @@ def main():
     naive_classifier = NaiveBayesClassifier.train(trainfeats)
     naive_classifier.show_most_informative_features()
 
+    # create a testing dataset
     testfeats = testneg + testpos
 
+    # placeholder for actual lbels and predictions
     refsets = collections.defaultdict(set)
     testsets = collections.defaultdict(set)
 
@@ -162,6 +168,7 @@ def main():
         testsets[predicted].add(i)
 
     # 86.7% accuracy.
+    print ('Unigram NB Results')
     print ('accuracy:', nltk.classify.util.accuracy(naive_classifier, testfeats))
     print ('pos precision:', nltk.precision(refsets['pos'], testsets['pos']))
     print ('pos recall:', nltk.recall(refsets['pos'], testsets['pos']))
@@ -187,12 +194,14 @@ def main():
         neg = [PorterStemmer().stem(word) for word in formatted_negative.lower().split() if len(word) > 1]
         bi_negreviews.append(neg)
 
-    # extract features
+    # extract features- this removes too frequent unigram features, 
+    # after identifying significant bigrams 
     bi_negfeats = [(bigram_word_feats(words=review, significant_uni=toocommon, n=20), 'neg') for review in bi_negreviews
                    if len(set(review)) > 1]
     bi_posfeats = [(bigram_word_feats(words=review, significant_uni=toocommon, n=20), 'pos') for review in bi_posreviews
                    if len(set(review)) > 1]
 
+    # training data            
     poscutoff = int(len(bi_posfeats) * 0.8)
     negcutoff = int(len(bi_negfeats) * 0.8)
     pos_n = len(bi_posfeats)
@@ -207,7 +216,7 @@ def main():
     bigram_naive_classifier = NaiveBayesClassifier.train(bi_trainfeats)
     bigram_naive_classifier.show_most_informative_features()
 
-    # 83.9% accuracy. not bad!
+    # test dataset & placeholders for labels and predictions
     bi_testfeats = bi_testneg + bi_testpos
     bi_refsets = collections.defaultdict(set)
     bi_testsets = collections.defaultdict(set)
@@ -218,6 +227,7 @@ def main():
         bi_testsets[bi_predicted].add(i)
 
     # 90.8% accuracy
+    print ('Unigram & Bigram NB Results:')
     print ('accuracy:', nltk.classify.util.accuracy(bigram_naive_classifier, bi_testfeats))
     print ('pos precision:', nltk.precision(bi_refsets['pos'], bi_testsets['pos']))
     print ('pos recall:', nltk.recall(bi_refsets['pos'], bi_testsets['pos']))
